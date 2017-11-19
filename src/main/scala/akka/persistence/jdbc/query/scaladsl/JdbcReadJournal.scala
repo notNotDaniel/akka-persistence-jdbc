@@ -22,7 +22,7 @@ import akka.actor.ExtendedActorSystem
 import akka.persistence.jdbc.config.ReadJournalConfig
 import akka.persistence.jdbc.query.JournalSequenceActor.{GetMaxOrderingId, MaxOrderingId}
 import akka.persistence.jdbc.query.dao.ReadJournalDao
-import akka.persistence.jdbc.util.{SlickDatabase, SlickDriver}
+import akka.persistence.jdbc.util.SlickExtension
 import akka.persistence.query.scaladsl._
 import akka.persistence.query.{EventEnvelope, Offset, Sequence}
 import akka.persistence.{Persistence, PersistentRepr}
@@ -68,15 +68,16 @@ class JdbcReadJournal(config: Config)(implicit val system: ExtendedActorSystem) 
   implicit val ec: ExecutionContext = system.dispatcher
   implicit val mat: Materializer = ActorMaterializer()
   val readJournalConfig = new ReadJournalConfig(config)
-  val db = SlickDatabase.forConfig(config, readJournalConfig.slickConfiguration)
-  sys.addShutdownHook(db.close())
 
   private val writePluginId = config.getString("write-plugin")
   private val eventAdapters = Persistence(system).adaptersFor(writePluginId)
 
   val readJournalDao: ReadJournalDao = {
+    val slickExtension = SlickExtension(system)
+    val db = slickExtension.readJournalDatabase
+    sys.addShutdownHook(db.close()) // TODO should this be done somewhere else?
     val fqcn = readJournalConfig.pluginConfig.dao
-    val profile: JdbcProfile = SlickDriver.forDriverName(config)
+    val profile: JdbcProfile = slickExtension.readJournalProfile
     val args = Seq(
       (classOf[Database], db),
       (classOf[JdbcProfile], profile),
@@ -85,7 +86,7 @@ class JdbcReadJournal(config: Config)(implicit val system: ExtendedActorSystem) 
       (classOf[ExecutionContext], ec),
       (classOf[Materializer], mat)
     )
-    system.asInstanceOf[ExtendedActorSystem].dynamicAccess.createInstanceFor[ReadJournalDao](fqcn, args) match {
+    system.dynamicAccess.createInstanceFor[ReadJournalDao](fqcn, args) match {
       case Success(dao)   => dao
       case Failure(cause) => throw cause
     }

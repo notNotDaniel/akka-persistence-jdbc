@@ -22,7 +22,7 @@ import akka.actor.{ActorSystem, ExtendedActorSystem}
 import akka.persistence.jdbc.config.JournalConfig
 import akka.persistence.jdbc.journal.JdbcAsyncWriteJournal.WriteFinished
 import akka.persistence.jdbc.journal.dao.JournalDao
-import akka.persistence.jdbc.util.{SlickDatabase, SlickDriver}
+import akka.persistence.jdbc.util.SlickExtension
 import akka.persistence.journal.AsyncWriteJournal
 import akka.persistence.{AtomicWrite, PersistentRepr}
 import akka.serialization.{Serialization, SerializationExtension}
@@ -45,11 +45,12 @@ class JdbcAsyncWriteJournal(config: Config) extends AsyncWriteJournal {
   implicit val mat: Materializer = ActorMaterializer()
   val journalConfig = new JournalConfig(config)
 
-  val db: Database = SlickDatabase.forConfig(config, journalConfig.slickConfiguration)
+  val slickExtension = SlickExtension(system)
+  val db: Database = slickExtension.journalDatabase
 
   val journalDao: JournalDao = {
     val fqcn = journalConfig.pluginConfig.dao
-    val profile: JdbcProfile = SlickDriver.forDriverName(config)
+    val profile: JdbcProfile = slickExtension.journalProfile
     val args = Seq(
       (classOf[Database], db),
       (classOf[JdbcProfile], profile),
@@ -98,7 +99,7 @@ class JdbcAsyncWriteJournal(config: Config) extends AsyncWriteJournal {
       .map(_ => ())
 
   override def postStop(): Unit = {
-    db.close()
+    db.close() // TODO maybe not?
     super.postStop()
   }
 
